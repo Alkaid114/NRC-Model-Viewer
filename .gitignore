@@ -142,5 +142,8 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
+# Electron 打包的输出文件夹
+release/
+
 # 项目总览及技术细节的文本文件
 概述.txt
