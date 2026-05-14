@@ -147,3 +147,6 @@ release/
 
 # 项目总览及技术细节的文本文件
 概述.txt
+
+# Claude Code 的配置文件夹
+.claude/
