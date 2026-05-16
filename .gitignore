@@ -81,6 +81,10 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+dist-electron/
+
+# Local dev server logs
+vite-dev*.log
 .output
 
 # Gatsby files
