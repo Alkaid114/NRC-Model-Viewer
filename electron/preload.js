@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readDir:          (p)             => ipcRenderer.invoke('fs:readDir', p),
   exists:           (p)             => ipcRenderer.invoke('fs:exists', p),
   openDirectory:    ()              => ipcRenderer.invoke('dialog:openDirectory'),
+  openPath:         (p)             => ipcRenderer.invoke('shell:openPath', p),
+  setDevTools:      (enabled)       => ipcRenderer.invoke('devtools:set', enabled),
 })

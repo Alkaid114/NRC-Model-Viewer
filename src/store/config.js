@@ -1,4 +1,4 @@
-import { reactive, ref, watchEffect } from 'vue'
+import { reactive, ref, watch, watchEffect } from 'vue'
 import { platform } from '../platform/index.js'
 
 export const config = reactive({
@@ -18,29 +18,38 @@ export const config = reactive({
 
 export const hiddenConfig = reactive({
   devMode: false,
-  showAssetPaths: false,
+  showAssetTags: false,
+  hideMissingAssets: false,
+  texFallback: false,
+  showUnconfedItems: false,
 })
 
 // ── Persistence ───────────────────────────────────────────────────────────────
-// Use watchEffect so Vue tracks ALL nested reactive reads automatically.
-// _ready prevents saving the default values before initConfig finishes loading.
+// _ready prevents saving before initConfig finishes loading.
 
 const _ready = ref(false)
 let saveTimer = null
+let hiddenSaveTimer = null
 
+// config is saved after every change (watchEffect tracks all nested reads).
 watchEffect(() => {
-  // Deep-read both objects so Vue tracks every nested property.
-  const snap       = JSON.parse(JSON.stringify(config))
-  const snapHidden = JSON.parse(JSON.stringify(hiddenConfig))
-
-  if (!_ready.value) return   // don't save before load completes
-
+  const snap = JSON.parse(JSON.stringify(config))
+  if (!_ready.value) return
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    platform.saveConfig(snap)
-    platform.saveHiddenConfig(snapHidden)
-  }, 400)
+  saveTimer = setTimeout(() => platform.saveConfig(snap), 400)
 })
+
+// hiddenConfig is saved only when the user explicitly changes something —
+// watch() (unlike watchEffect) does not fire on mount, so the file is never
+// created on first launch if the user never opens the hidden settings.
+watch(hiddenConfig, snap => {
+  if (!_ready.value) return
+  clearTimeout(hiddenSaveTimer)
+  hiddenSaveTimer = setTimeout(() => platform.saveHiddenConfig(JSON.parse(JSON.stringify(snap))), 400)
+}, { deep: true })
+
+// Toggle DevTools whenever devMode changes.
+watch(() => hiddenConfig.devMode, enabled => platform.setDevTools(enabled))
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 

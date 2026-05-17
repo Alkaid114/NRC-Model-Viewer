@@ -1,10 +1,32 @@
 <script setup>
 import { computed, nextTick, reactive, ref, onMounted, onUnmounted, watch } from 'vue'
-import { config } from '../store/config.js'
+import { config, hiddenConfig } from '../store/config.js'
+import { costumeStore, rescanCostumes } from '../store/costumeStore.js'
+import { platform } from '../platform/index.js'
+import ModelViewer from '../components/ModelViewer.vue'
+import {
+  DEFAULT_MODEL_BASES,
+  L1_TAB_FILTERS as RULE_L1_TAB_FILTERS,
+  REQUIRED_SLOTS,
+  SUB_TAB_FILTERS as RULE_SUB_TAB_FILTERS,
+  TYPE_COLORS as RULE_TYPE_COLORS,
+  TYPE_TO_SLOT,
+} from '../assets/costumeRules.js'
+import {
+  baseTextureUrl,
+  frameUrl,
+  modelTextureUrl,
+  resolveGameTextureUrl,
+} from '../assets/assetPaths.js'
+import {
+  defaultItemFor,
+  previewEntryFor,
+  textureIdFor,
+} from '../assets/previewResolver.js'
 
 // ── Layout Persistence ────────────────────────────────────────────────────────
 
-const CARD_MIN_MIN = 56
+const CARD_MIN_MIN = 80
 const CARD_MIN_MAX = 160
 const CARD_MIN_COLUMNS = 2
 const CARD_GRID_GAP = 7
@@ -18,12 +40,7 @@ const DIVIDER_SIZE = 4
 const RIGHT_PANE_MIN_HEIGHT = 120
 const RIGHT_SPLIT_FALLBACK_MIN = 15
 const RIGHT_SPLIT_FALLBACK_MAX = 85
-const DEBUG_CARD_GRID = true
 const DEFAULT = { leftWidth: 320, rightSplit: 42, cardMin: 120 }
-
-function loadLayout() {
-  return { ...DEFAULT, ...(config.ui.layout?.costume ?? {}) }
-}
 
 function clampCardMin(value) {
   const next = Number(value)
@@ -42,9 +59,10 @@ function clampRightSplit(value, totalHeight = 0) {
   return Math.max(RIGHT_SPLIT_FALLBACK_MIN, Math.min(RIGHT_SPLIT_FALLBACK_MAX, fallback))
 }
 
-const leftWidth  = ref(loadLayout().leftWidth)
-const rightSplit = ref(loadLayout().rightSplit)
-const cardMin    = ref(clampCardMin(loadLayout().cardMin))
+const _initLayout = { ...DEFAULT, ...(config.ui.layout?.costume ?? {}) }
+const leftWidth  = ref(Math.max(PANE_MIN, _initLayout.leftWidth))
+const rightSplit = ref(clampRightSplit(_initLayout.rightSplit))
+const cardMin    = ref(clampCardMin(_initLayout.cardMin))
 const layoutRoot = ref(null)
 const itemGrid = ref(null)
 const outfitSlots = ref(null)
@@ -57,7 +75,6 @@ const outfitSlotsContentWidth = ref(0)
 let layoutResizeObserver = null
 let gridResizeObserver = null
 let outfitResizeObserver = null
-let debugFrame = 0
 
 // Dynamic left-pane minimum: natural sub-tab bar width + sidebar, or PANE_MIN when no sub-tabs.
 const dynamicPaneMin = computed(() =>
@@ -114,7 +131,7 @@ function persistLayout() {
   if (!config.ui.layout) config.ui.layout = {}
   config.ui.layout.costume = {
     leftWidth: leftWidth.value,
-    rightSplit: clampRightSplit(rightSplit.value),
+    rightSplit: rightSplit.value,
     cardMin: cardMin.value,
   }
 }
@@ -150,56 +167,6 @@ function measureOutfitSlotsContentWidth() {
   return outfitSlots.value.clientWidth - paddingInline
 }
 
-function logCardGrid(reason = 'manual') {
-  if (!DEBUG_CARD_GRID || !itemGrid.value) return
-
-  const grid = itemGrid.value
-  const style = window.getComputedStyle(grid)
-  const gridRect = grid.getBoundingClientRect()
-  const firstCard = grid.querySelector('.item-card')
-  const firstCardRect = firstCard?.getBoundingClientRect()
-  const paddingInline = readPx(style.paddingLeft) + readPx(style.paddingRight)
-  const gap = readPx(style.columnGap)
-  const contentWidth = grid.clientWidth - paddingInline
-  const tracks = style.gridTemplateColumns === 'none'
-    ? []
-    : style.gridTemplateColumns.split(' ').filter(Boolean)
-
-  console.groupCollapsed(`[CostumeGrid] ${reason}`)
-  console.table({
-    leftWidth: leftWidth.value,
-    effectiveLeftWidth: effectiveLeftWidth.value,
-    rightSplit: rightSplit.value,
-    paneMin: PANE_MIN,
-    layoutWidth: layoutWidth.value,
-    savedCardMin: cardMin.value,
-    dynamicCardMax: cardMinMax.value,
-    effectiveCardMin: effectiveCardMin.value,
-    actualCardWidth: Math.round(actualCardWidth.value * 100) / 100,
-    minColumns: CARD_MIN_COLUMNS,
-    observedContentWidth: itemGridContentWidth.value,
-    gridClientWidth: grid.clientWidth,
-    gridOffsetWidth: grid.offsetWidth,
-    gridScrollWidth: grid.scrollWidth,
-    gridRectWidth: Math.round(gridRect.width * 100) / 100,
-    contentWidth,
-    paddingInline,
-    gap,
-    trackCount: tracks.length,
-    gridTemplateColumns: style.gridTemplateColumns,
-    firstCardWidth: firstCardRect ? Math.round(firstCardRect.width * 100) / 100 : null,
-    firstCardOffsetWidth: firstCard?.offsetWidth ?? null,
-    overflowX: grid.scrollWidth > grid.clientWidth,
-  })
-  console.groupEnd()
-}
-
-function scheduleCardGridLog(reason) {
-  if (!DEBUG_CARD_GRID) return
-  cancelAnimationFrame(debugFrame)
-  debugFrame = requestAnimationFrame(() => logCardGrid(reason))
-}
-
 // Measure the sub-tab bar's natural (unconstrained) content width.
 // Temporarily sets width to max-content for an accurate read, then restores.
 // Called on mount and whenever the active L1 tab changes.
@@ -214,12 +181,10 @@ async function measureSubTabBar() {
 }
 
 onMounted(() => {
-  applyLayout(config.ui.layout?.costume)
   if (layoutRoot.value) {
     layoutWidth.value = layoutRoot.value.clientWidth
     layoutResizeObserver = new ResizeObserver(([entry]) => {
       layoutWidth.value = entry.contentRect.width
-      scheduleCardGridLog('layout-resize')
     })
     layoutResizeObserver.observe(layoutRoot.value)
   }
@@ -227,19 +192,15 @@ onMounted(() => {
   itemGridContentWidth.value = measureGridContentWidth()
   gridResizeObserver = new ResizeObserver(([entry]) => {
     itemGridContentWidth.value = entry.contentRect.width
-    scheduleCardGridLog('resize')
   })
   gridResizeObserver.observe(itemGrid.value)
   if (outfitSlots.value) {
     outfitSlotsContentWidth.value = measureOutfitSlotsContentWidth()
     outfitResizeObserver = new ResizeObserver(([entry]) => {
       outfitSlotsContentWidth.value = entry.contentRect.width
-      scheduleCardGridLog('outfit-resize')
     })
     outfitResizeObserver.observe(outfitSlots.value)
   }
-  window.__nrcLogCostumeGrid = logCardGrid
-  scheduleCardGridLog('mounted')
   measureSubTabBar()
 })
 
@@ -247,22 +208,13 @@ onUnmounted(() => {
   layoutResizeObserver?.disconnect()
   gridResizeObserver?.disconnect()
   outfitResizeObserver?.disconnect()
-  cancelAnimationFrame(debugFrame)
-  if (window.__nrcLogCostumeGrid === logCardGrid) delete window.__nrcLogCostumeGrid
 })
 
 watch(
   () => config.ui.layout?.costume,
-  (layout) => {
-    applyLayout(layout)
-    scheduleCardGridLog('layout-config')
-  },
+  layout => applyLayout(layout),
   { deep: true }
 )
-
-watch([leftWidth, effectiveLeftWidth, cardMin, effectiveCardMin, cardMinMax, actualCardWidth, actualOutfitSlotWidth], () => {
-  scheduleCardGridLog('layout-state')
-})
 
 // ── Drag Handling ─────────────────────────────────────────────────────────────
 
@@ -358,7 +310,7 @@ const L1_TABS = [
     subTabs: [
       { id: '17', label: '肤色', icon: '🟤' },
       { id: '18', label: '眉毛', icon: '✏️' },
-      { id: '19', label: '睫毛', icon: '👁' },
+      { id: '19', label: '睫毛', icon: '👁'  },
       { id: '20', label: '瞳孔', icon: '🔵' },
       { id: '21', label: '贴花', icon: '🌸' },
     ],
@@ -389,71 +341,373 @@ function setL1Tab(id) {
   }
 }
 
-// ── Test Data ─────────────────────────────────────────────────────────────────
-// Colour variants of the same base item are stored in `variants`.
-// Each card tracks its active variant index in `selectedVariants`.
+// ── Item Display ──────────────────────────────────────────────────────────────
 
-const testItems = [
-  {
-    id: '2070390101', name: '菡萏留声', type: 'Cup', gender: 'PC2',
-    assets: { model: true, tex: true, mat: true },
-    variants: [
-      { id: '2070390101', hue: '#c8a0b0' },
-      { id: '2070390102', hue: '#90a8c8' },
-      { id: '2070390103', hue: '#a0c890' },
-    ],
-  },
-  { id: '2090001001', name: '月光序曲·下', type: 'Ps',  gender: 'PC2', assets: { model: true, tex: true, mat: true  }, variants: [{ id: '2090001001', hue: '#b0a0c8' }] },
-  { id: '2090002001', name: '晨曦织梦·下', type: 'Ps',  gender: 'PC2', assets: { model: true, tex: true, mat: false }, variants: [{ id: '2090002001', hue: '#c8b890' }] },
-  {
-    id: '2010001001', name: '自然卷', type: 'Hr', gender: 'PC2',
-    assets: { model: true, tex: true, mat: true },
-    variants: [
-      { id: '2010001001', hue: '#505050' },
-      { id: '2010001002', hue: '#906050' },
-    ],
-  },
-  { id: '2010002001', name: '直发短切',   type: 'Hr',  gender: 'PC2', assets: { model: true, tex: false, mat: false }, variants: [{ id: '2010002001', hue: '#c8b0a0' }] },
-  {
-    id: '1010001001', name: '卷发', type: 'Hr', gender: 'PC1',
-    assets: { model: true, tex: true, mat: true },
-    variants: [
-      { id: '1010001001', hue: '#383838' },
-      { id: '1010001002', hue: '#785038' },
-    ],
-  },
-  { id: '2070001001', name: '基础上衣',   type: 'Cup', gender: 'PC2', assets: { model: true, tex: true, mat: false }, variants: [{ id: '2070001001', hue: '#d8d0c8' }] },
-  { id: '1070001001', name: '基础上衣·男', type: 'Cup', gender: 'PC1', assets: { model: true, tex: false, mat: false }, variants: [{ id: '1070001001', hue: '#c0c8d0' }] },
-  { id: '2030001001', name: '标准眉形',   type: 'Br',  gender: 'PC2', assets: { model: true, tex: true, mat: true  }, variants: [{ id: '2030001001', hue: '#907090' }] },
-  { id: '2040001001', name: '单眼皮',     type: 'Et',  gender: 'PC2', assets: { model: true, tex: true, mat: true  }, variants: [{ id: '2040001001', hue: '#906070' }] },
-]
+// Swatch palette used when actual material colours are not yet known.
+const SWATCH_PALETTE = ['#7c8eb5', '#b57c8e', '#8eb57c', '#b5a87c', '#9c7cb5', '#7cb5b5', '#b58e7c']
 
 // Per-card selected variant index (keyed by item.id).
 const selectedVariants = reactive({})
 function activeVariant(item) {
   return item.variants[selectedVariants[item.id] ?? 0] ?? item.variants[0]
 }
+function swatchColor(v, idx) {
+  if (v.colourIds?.length === 1) return v.colourIds[0]
+  if (v.colourIds?.length >= 2)
+    return `linear-gradient(135deg, ${v.colourIds[0]} 50%, ${v.colourIds[1]} 50%)`
+  return SWATCH_PALETTE[idx % SWATCH_PALETTE.length]
+}
+
+// ── Tab → type filters ────────────────────────────────────────────────────────
+
+const searchText = ref('')
+
+const displayedItems = computed(() => {
+  if (!costumeStore.scanned) return []
+
+  // Gender: always include PC3 (unisex) items
+  let items = costumeStore.items.filter(i =>
+    i.gender === gender.value || i.gender === 'PC3'
+  )
+
+  // Hide items with no conf entry unless the user explicitly enables them.
+  if (!hiddenConfig.showUnconfedItems) {
+    items = items.filter(i => i.hasConf)
+  }
+
+  // Tab filter
+  const sub = activeSubTab.value
+  const l1  = activeL1Tab.value
+  if (sub && RULE_SUB_TAB_FILTERS[sub]) {
+    items = items.filter(RULE_SUB_TAB_FILTERS[sub])
+  } else if (l1 && RULE_L1_TAB_FILTERS[l1]) {
+    items = items.filter(RULE_L1_TAB_FILTERS[l1])
+  }
+
+  // Search
+  const q = searchText.value.trim().toLowerCase()
+  if (q) {
+    items = items.filter(i =>
+      (i.name ?? '').toLowerCase().includes(q) ||
+      i.id.includes(q) ||
+      i.type.toLowerCase().includes(q)
+    )
+  }
+
+  return items
+})
+
+const displayedSuits = computed(() => {
+  if (!costumeStore.scanned) return []
+  const q = searchText.value.trim().toLowerCase()
+  return costumeStore.suits.filter(s =>
+    (s.gender === gender.value || s.gender === 'PC3') &&
+    (!q || s.name.toLowerCase().includes(q))
+  )
+})
+
+function suitIconUrl(suit) {
+  return resolveGameTextureUrl(suit.icon)
+}
+
+function openAssetDir(item, tag) {
+  const subdir = tag === 'tex' ? 'Tex' : tag === 'mat' ? 'Mat' : null
+  platform.openPath(subdir ? platform.joinPath(item.folderPath, subdir) : item.folderPath)
+}
+
+function itemIconUrl(item) {
+  const av = activeVariant(item)
+  const iconUrl = resolveGameTextureUrl(av?.icon ?? item.icon)
+  if (iconUrl) return iconUrl
+  if (hiddenConfig.texFallback && item.assets.tex && item.folderPath) {
+    const texId = textureIdFor(item, activeVariant)
+    return baseTextureUrl(item, texId) ?? modelTextureUrl(item, item.type, texId)
+  }
+  return null
+}
+
+
+const scanProgressPct = computed(() => {
+  const { done, total } = costumeStore.progress
+  return total > 0 ? Math.round(done / total * 100) : 0
+})
 
 // ── Outfit Slots ──────────────────────────────────────────────────────────────
 
-const slots = [
-  { id: 'hr',  label: '发型', value: '自然卷·黑', icon: '💇' },
-  { id: 'br',  label: '眉毛', value: '标准眉形',  icon: '✏️' },
-  { id: 'et',  label: '眼眶', value: '单眼皮',    icon: '👁' },
-  { id: 'es',  label: '眼球', value: null,        icon: '👁' },
-  { id: 'fe',  label: '脸型', value: null,        icon: '😊' },
-  { id: 'cup', label: '上衣', value: '菡萏留声',  icon: '👗' },
-  { id: 'ps',  label: '下装', value: '月光序曲',  icon: '👖' },
-  { id: 'so',  label: '袜子', value: null,        icon: '🧦' },
-  { id: 'se',  label: '鞋子', value: null,        icon: '👠' },
-  { id: 'ht',  label: '帽子', value: null,        icon: '🎩' },
-  { id: 'hi',  label: '头饰', value: null,        icon: '💫' },
-  { id: 'mp',  label: '彩绘', value: null,        icon: '💄' },
-  { id: 'ge',  label: '手饰', value: null,        icon: '💍' },
-  { id: 'bg',  label: '背包', value: null,        icon: '🎒' },
-  { id: 'bi',  label: '挂饰', value: null,        icon: '🔮' },
-  { id: 'mw',  label: '法杖', value: null,        icon: '🪄' },
+const SLOT_DEFS = [
+  { id: 'sk',  label: '肤色', icon: '🎨' },
+  { id: 'hr',  label: '发型', icon: '💇' },
+  { id: 'br',  label: '眉毛', icon: '✏️' },
+  { id: 'et',  label: '眼眶', icon: '👁'  },
+  { id: 'es',  label: '眼球', icon: '👁'  },
+  { id: 'pu',  label: '瞳孔', icon: '🔵' },
+  { id: 'fe',  label: '脸型', icon: '😊' },
+  { id: 'dc',  label: '贴花', icon: '🌸' },
+  { id: 'fi',  label: '面饰', icon: '🎭' },
+  { id: 'er',  label: '颈背', icon: '🔗' },
+  { id: 'cup', label: '上衣', icon: '👗' },
+  { id: 'ps',  label: '下装', icon: '👖' },
+  { id: 'so',  label: '袜子', icon: '🧦' },
+  { id: 'se',  label: '鞋子', icon: '👠' },
+  { id: 'ht',  label: '帽子', icon: '🎩' },
+  { id: 'hi',  label: '头饰', icon: '💫' },
+  { id: 'mp',  label: '彩绘', icon: '💄' },
+  { id: 'ge',  label: '手饰', icon: '💍' },
+  { id: 'bg',  label: '背包', icon: '🎒' },
+  { id: 'bi',  label: '挂饰', icon: '🔮' },
+  { id: 'mw',  label: '法杖', icon: '🪄' },
 ]
+
+// outfit[slotId] = item object or null
+const outfit = reactive({})
+
+function _defaultItemFor(slotId) {
+  return defaultItemFor(slotId, gender.value, costumeStore.items)
+}
+
+function _previewEntryFor(item) {
+  return previewEntryFor(item, {
+    activeVariant,
+    gender: gender.value,
+    outfit,
+    items: costumeStore.items,
+  })
+}
+const previewModelUrls = computed(() => {
+  const seen = new Set()
+  const entries = []
+  for (const [slotId, item] of Object.entries(outfit)) {
+    if (!item?.assets.model || !item.folderPath || !item.modelFile) continue
+    const entry = _previewEntryFor(item)
+    if (seen.has(entry.url)) continue  // 连体服 cup+ps 共享同一模型，只取首个槽位的 key
+    seen.add(entry.url)
+    entries.push({ key: slotId, ...entry })
+  }
+  return entries
+})
+
+// Items with a model file, or config-only virtual items (no folderPath), can be selected.
+function canSelect(item) {
+  return item.assets.model || item.folderPath === null
+}
+
+function isEquipped(item) {
+  const slotId = TYPE_TO_SLOT[item.type]
+  return slotId ? outfit[slotId]?.id === item.id : false
+}
+
+function handleCardClick(item) {
+  if (!canSelect(item)) return
+  const slotId = TYPE_TO_SLOT[item.type]
+  if (!slotId) return
+  // Required slots can never be left empty.
+  if (REQUIRED_SLOTS.has(slotId) && outfit[slotId]?.id === item.id) return
+  outfit[slotId] = item
+
+  // ── Slot conflict resolution ──────────────────────────────────────────────
+  // Ht and Hi share the same game "hat" slot — equipping one removes the other.
+  // Regular Hr hairstyle doesn't work under a hat; clear it so the user must
+  // pick an Hr_Ht variant.
+  if (slotId === 'ht') {
+    outfit['hi'] = null
+  } else if (slotId === 'hi') {
+    outfit['ht'] = null
+  }
+
+  // Jumpsuit (Cup with isSuit=true) occupies both cup and ps slots.
+  // A regular Cup or Ps item removes the jumpsuit from the other slot.
+  if (slotId === 'cup') {
+    if (item.isSuit) {
+      outfit['ps'] = item                 // jumpsuit fills ps as well
+    } else if (outfit['ps']?.isSuit) {
+      outfit['ps'] = null                 // regular top removes jumpsuit bottom
+      _applyDefaultFor('ps')              // ps is required -> restore default
+    }
+  } else if (slotId === 'ps') {
+    if (outfit['cup']?.isSuit) {
+      outfit['cup'] = null                // separate bottom removes jumpsuit top
+      _applyDefaultFor('cup')             // cup is required → restore default
+    }
+  }
+}
+
+// Fill one required slot from the gender-specific default, unless already occupied.
+function _applyDefaultFor(slotId) {
+  if (outfit[slotId]) return
+  const item = _defaultItemFor(slotId)
+  if (item) outfit[slotId] = item
+}
+
+// Fill all required slots from scanned items using the gender-specific defaults.
+// Skips slots that already have a user selection.
+function applyDefaults() {
+  if (!costumeStore.scanned) return
+  for (const slotId of Object.keys(DEFAULT_MODEL_BASES[gender.value] ?? {})) {
+    _applyDefaultFor(slotId)
+  }
+}
+
+// After a rescan, refresh outfit item references to the new scan results so that
+// model URLs and textures reflect the latest filesystem state.
+function _refreshOutfit() {
+  for (const [slotId, item] of Object.entries(outfit)) {
+    if (!item) continue
+    const fresh = costumeStore.items.find(i => i.id === item.id && i.type === item.type)
+    if (fresh) outfit[slotId] = fresh
+    else if (!REQUIRED_SLOTS.has(slotId)) outfit[slotId] = null
+  }
+  applyDefaults()
+}
+
+function handleSuitClick(suit) {
+  for (const itemId of suit.itemIds) {
+    const item = costumeStore.items.find(
+      i => i.id === itemId && (i.gender === gender.value || i.gender === 'PC3')
+    )
+    if (item) handleCardClick(item)
+  }
+}
+
+function clearSlot(slotId) {
+  if (REQUIRED_SLOTS.has(slotId)) return
+  outfit[slotId] = null
+  if ((slotId === 'ht' || slotId === 'hi') && outfit.hr?.type === 'Hr_Ht') {
+    const defaultHr = _defaultItemFor('hr')
+    if (defaultHr) outfit.hr = defaultHr
+  }
+}
+
+// Display name for an equipped slot, using the currently selected colour variant.
+function slotValue(slotId) {
+  const item = outfit[slotId]
+  if (!item) return null
+  const variantIdx = selectedVariants[item.id] ?? 0
+  const variant = item.variants[variantIdx] ?? item.variants[0]
+  return (item.variants.length > 1 && variant?.name) ? variant.name : item.name
+}
+
+// Thumbnail URL for an equipped slot.
+function slotIconUrl(slotId) {
+  const item = outfit[slotId]
+  return item ? itemIconUrl(item) : null
+}
+
+function resetOutfit() {
+  for (const key of Object.keys(outfit)) delete outfit[key]
+  applyDefaults()
+}
+
+// After each scan (initial or rescan) refresh outfit item references and fill defaults.
+watch(() => costumeStore.scanned, scanned => { if (scanned) _refreshOutfit() })
+
+// On gender switch: clear the whole outfit and re-apply defaults for the new gender.
+watch(gender, () => {
+  for (const key of Object.keys(outfit)) delete outfit[key]
+  applyDefaults()
+})
+
+// ── Model preview ref & JSON export ──────────────────────────────────────────
+
+const modelViewerRef = ref(null)
+
+// Convert nrcfile:///D:/foo%20bar/baz → D:\foo bar\baz
+function _toWinPath(url) {
+  if (!url) return null
+  let p = url
+  if (p.startsWith('nrcfile:///')) p = p.slice('nrcfile:///'.length)
+  else if (p.startsWith('nrcfile://')) p = p.slice('nrcfile://'.length)
+  return decodeURIComponent(p).replace(/\//g, '\\')
+}
+
+// Find the avatar root by looking for the .../PC segment that precedes PC[123]/Avatar/
+function _avatarRoot(winPath) {
+  if (!winPath) return null
+  const m = winPath.match(/^(.*\\PC)\\PC[123]\\/i)
+  return m ? m[1] : null
+}
+
+function _rel(winPath, root) {
+  if (!winPath || !root) return winPath
+  const prefix = root.endsWith('\\') ? root : root + '\\'
+  return winPath.startsWith(prefix) ? winPath.slice(prefix.length) : winPath
+}
+
+function _replaceExt(path, newExt) {
+  if (!path || !newExt) return path
+  const dot = path.lastIndexOf('.')
+  return dot >= 0 ? path.slice(0, dot) + newExt : path + newExt
+}
+
+// Derive the Mat\ path from the texture path: replace Tex\{file} → Mat\{matName}.{ext}
+function _matPath(texRelPath, matName, matExt) {
+  if (!texRelPath) return `Mat\\${matName}${matExt}`
+  const m = texRelPath.match(/^(.*\\)Tex\\[^\\]+$/)
+  return m ? `${m[1]}Mat\\${matName}${matExt}` : `Mat\\${matName}${matExt}`
+}
+
+// ── Export dialog state ───────────────────────────────────────────────────────
+
+const showExportDialog = ref(false)
+const exportModelExt   = ref('')
+const exportTexExt     = ref('')
+const exportMatExt     = ref('')
+
+const MODEL_EXT_OPTS = ['默认', '.gltf', '.glb', '.psk', '.uemodel']
+const TEX_EXT_OPTS   = ['默认', '.png', '.tga']
+const MAT_EXT_OPTS   = ['默认', '.json', '.props.txt']
+
+function openExportDialog() { showExportDialog.value = true }
+
+function doExport() {
+  showExportDialog.value = false
+  const mExt   = exportModelExt.value
+  const tExt   = exportTexExt.value
+  const matExt = exportMatExt.value || costumeStore.matFileExt || '.json'
+  const resolved = modelViewerRef.value?.resolvedMaterials ?? {}
+
+  let avatarRoot = null
+  for (const entry of previewModelUrls.value) {
+    avatarRoot = _avatarRoot(_toWinPath(entry.url))
+    if (avatarRoot) break
+  }
+
+  const data = {
+    avatarRoot: avatarRoot ?? '',
+    gender: gender.value,
+    slots: previewModelUrls.value.map(entry => {
+      const mats       = resolved[entry.key] ?? {}
+      const modelRel   = _replaceExt(_rel(_toWinPath(entry.url), avatarRoot), mExt)
+      const materials  = {}
+      for (const [matName, info] of Object.entries(mats)) {
+        const matKey = `${matName}${matExt}`
+        if (!info) {
+          materials[matKey] = { mat: _matPath(null, matName, matExt), texture: null }
+          continue
+        }
+        if (info.fallbackColor) {
+          materials[matKey] = { mat: _matPath(null, matName, matExt), color: info.fallbackColor }
+          continue
+        }
+        const texRel  = _rel(_toWinPath(info.url), avatarRoot)
+        const texPath = _replaceExt(texRel, tExt)
+        const rec     = { mat: _matPath(texRel, matName, matExt), texture: texPath }
+        if (info.overlayUrl) rec.overlay = _replaceExt(_rel(_toWinPath(info.overlayUrl), avatarRoot), tExt)
+        materials[matKey] = rec
+      }
+      return { slot: entry.key, model: modelRel, materials }
+    }),
+  }
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `nrc_outfit_${gender.value}_${Date.now()}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
@@ -493,7 +747,10 @@ const slots = [
               :title="tab.label"
               @click="setL1Tab(tab.id)"
             >
-              <span class="tab-icon-wrap">{{ tab.icon }}</span>
+              <span class="tab-icon-wrap">
+                <img v-if="costumeStore.closetTabIcons[tab.id]" class="tab-frame-icon" :src="frameUrl(costumeStore.closetTabIcons[tab.id])" @error="e => e.target.style.display='none'" />
+                <span v-else>{{ tab.icon }}</span>
+              </span>
               <span class="tab-label">{{ tab.label }}</span>
             </button>
           </nav>
@@ -512,7 +769,8 @@ const slots = [
                 @click="activeSubTab = sub.id"
               >
                 <div class="sub-thumb">
-                  <span class="sub-thumb-icon">{{ sub.icon }}</span>
+                  <img v-if="costumeStore.closetTabIcons[sub.id]" class="sub-frame-icon" :src="frameUrl(costumeStore.closetTabIcons[sub.id])" @error="e => e.target.style.display='none'" />
+                  <span v-else class="sub-thumb-icon">{{ sub.icon }}</span>
                 </div>
                 <span class="sub-label">{{ sub.label }}</span>
               </button>
@@ -525,7 +783,7 @@ const slots = [
                   <circle cx="11" cy="11" r="7"/>
                   <path d="m21 21-4.35-4.35"/>
                 </svg>
-                <input type="text" class="search-input" placeholder="搜索…" />
+                <input type="text" class="search-input" placeholder="搜索…" v-model="searchText" />
               </div>
               <div class="card-size-control" title="Card size">
                 <svg class="card-size-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -544,9 +802,47 @@ const slots = [
                   @input="setCardMin($event.target.value)"
                 />
               </div>
+
+              <!-- Scan trigger -->
+              <button
+                class="head-action-btn scan-btn"
+                :class="{ scanning: costumeStore.scanning }"
+                :disabled="costumeStore.scanning"
+                :title="costumeStore.scanning ? `扫描中 ${scanProgressPct}%` : '扫描本地模型资产'"
+                @click="rescanCostumes"
+              >
+                <span v-if="costumeStore.scanning">{{ scanProgressPct }}%</span>
+                <span v-else>扫描</span>
+              </button>
+            </div>
+
+            <!-- Empty / scan state -->
+            <div v-if="!costumeStore.scanned && !costumeStore.scanning" class="scan-empty view-empty">
+              <svg class="view-empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/>
+                <path d="M11 8v6M8 11h6"/>
+              </svg>
+              <p class="view-empty__title">尚未扫描</p>
+              <p class="view-empty__desc">
+                <span v-if="!config.paths.models">请先在设置中配置模型路径</span>
+                <span v-else>点击工具栏"扫描"按钮加载本地资产</span>
+              </p>
+            </div>
+
+            <div v-else-if="costumeStore.scanning" class="scan-empty view-empty">
+              <div class="scan-progress-ring"></div>
+              <p class="view-empty__title">扫描中…</p>
+              <p class="view-empty__desc">{{ costumeStore.progress.done }} / {{ costumeStore.progress.total }}</p>
+            </div>
+
+            <div v-else-if="costumeStore.error" class="scan-empty view-empty">
+              <p class="view-empty__title">扫描失败</p>
+              <p class="view-empty__desc">{{ costumeStore.error }}</p>
+              <button class="head-action-btn" style="margin-top:10px" @click="rescanCostumes">重试</button>
             </div>
 
             <div
+              v-else
               ref="itemGrid"
               class="item-grid scrollable"
               :style="{
@@ -555,35 +851,85 @@ const slots = [
                 '--item-card-footer-height': CARD_FOOTER_HEIGHT + 'px',
               }"
             >
-              <div
-                v-for="item in testItems"
-                :key="item.id"
-                class="item-card"
-              >
-                <div class="card-thumb" :style="{ background: activeVariant(item).hue }">
-                  <!-- Asset presence indicators: Model / Tex / Mat -->
-                  <div class="asset-tags">
-                    <span class="asset-tag" :class="{ missing: !item.assets.model }">Model</span>
-                    <span class="asset-tag" :class="{ missing: !item.assets.tex }">Tex</span>
-                    <span class="asset-tag" :class="{ missing: !item.assets.mat }">Mat</span>
+              <!-- ── Suits tab ── -->
+              <template v-if="activeL1Tab === '1'">
+                <div v-if="displayedSuits.length === 0" class="grid-empty">暂无套装数据</div>
+                <div
+                  v-for="suit in displayedSuits"
+                  :key="suit.id"
+                  class="item-card suit-card"
+                  @click="handleSuitClick(suit)"
+                >
+                  <div class="card-thumb" style="background: #252830">
+                    <img
+                      v-if="suitIconUrl(suit)"
+                      class="card-thumb-img suit-thumb-img"
+                      :src="suitIconUrl(suit)"
+                      @error="e => e.target.style.display = 'none'"
+                    />
+                    <span v-if="suit.gradeName" class="suit-grade-badge">{{ suit.gradeName }}</span>
                   </div>
-                  <!-- Colour variant swatches — only shown when the item has multiple variants -->
+                  <div class="card-footer">
+                    <p class="card-name">{{ suit.name }}</p>
+                    <p class="card-id">{{ suit.itemIds.length }} 件单品</p>
+                  </div>
+                </div>
+              </template>
+
+              <!-- ── Normal items tabs ── -->
+              <template v-else>
+                <div v-if="displayedItems.length === 0" class="grid-empty">暂无匹配资产</div>
+                <div
+                  v-for="item in displayedItems"
+                  :key="item.id"
+                  class="item-card"
+                  :class="{
+                    equipped:     isEquipped(item),
+                    unselectable: !canSelect(item),
+                  }"
+                  @click="handleCardClick(item)"
+                >
+                <div class="card-thumb" :style="{ background: RULE_TYPE_COLORS[item.type] ?? '#252830' }">
+                  <img
+                    v-if="itemIconUrl(item)"
+                    class="card-thumb-img"
+                    :src="itemIconUrl(item)"
+                    @error="e => e.target.style.display = 'none'"
+                  />
+                  <!-- Asset presence indicators — click to open folder -->
+                  <div v-if="hiddenConfig.showAssetTags" class="asset-tags">
+                    <template v-if="hiddenConfig.hideMissingAssets">
+                      <button v-if="item.assets.model" class="asset-tag" @click.stop="openAssetDir(item, 'model')">Model</button>
+                      <button v-if="item.assets.tex"   class="asset-tag" @click.stop="openAssetDir(item, 'tex')">Tex</button>
+                      <button v-if="item.assets.mat"   class="asset-tag" @click.stop="openAssetDir(item, 'mat')">Mat</button>
+                    </template>
+                    <template v-else>
+                      <button class="asset-tag" :class="{ missing: !item.assets.model }"
+                        @click.stop="item.assets.model && openAssetDir(item, 'model')">Model</button>
+                      <button class="asset-tag" :class="{ missing: !item.assets.tex }"
+                        @click.stop="item.assets.tex && openAssetDir(item, 'tex')">Tex</button>
+                      <button class="asset-tag" :class="{ missing: !item.assets.mat }"
+                        @click.stop="item.assets.mat && openAssetDir(item, 'mat')">Mat</button>
+                    </template>
+                  </div>
+                  <!-- Colour variant swatches -->
                   <div v-if="item.variants.length > 1" class="variant-swatches">
                     <button
                       v-for="(v, idx) in item.variants"
                       :key="v.id"
                       class="variant-swatch"
                       :class="{ active: (selectedVariants[item.id] ?? 0) === idx }"
-                      :style="{ background: v.hue }"
+                      :style="{ background: swatchColor(v, idx) }"
                       @click.stop="selectedVariants[item.id] = idx"
                     />
                   </div>
                 </div>
                 <div class="card-footer">
-                  <p class="card-name">{{ item.name }}</p>
-                  <p class="card-id">{{ activeVariant(item).id }}</p>
+                  <p class="card-name">{{ activeVariant(item).name ?? item.name }}</p>
+                  <p class="card-id">{{ item.assets.model ? item.modelBaseName : '' }}</p>
                 </div>
               </div>
+              </template>
             </div>
 
           </div>
@@ -604,7 +950,7 @@ const slots = [
         <div class="pane-top" :style="{ height: rightSplit + '%' }">
           <div class="panel-head">
             <span>已选服装配置区</span>
-            <button class="head-action-btn">重置</button>
+            <button class="head-action-btn" @click="resetOutfit">重置</button>
           </div>
           <div
             ref="outfitSlots"
@@ -616,19 +962,26 @@ const slots = [
             }"
           >
             <div
-              v-for="slot in slots"
+              v-for="slot in SLOT_DEFS"
               :key="slot.id"
               class="outfit-slot"
-              :class="{ equipped: slot.value }"
+              :class="{ equipped: !!outfit[slot.id], required: REQUIRED_SLOTS.has(slot.id) }"
+              @click="clearSlot(slot.id)"
             >
-              <!-- Square icon on the left -->
+              <!-- Square icon / thumbnail on the left -->
               <div class="slot-thumb">
-                <span class="slot-thumb-icon">{{ slot.icon }}</span>
+                <img
+                  v-if="slotIconUrl(slot.id)"
+                  class="slot-thumb-img"
+                  :src="slotIconUrl(slot.id)"
+                  @error="e => e.target.style.display = 'none'"
+                />
+                <span v-else class="slot-thumb-icon">{{ slot.icon }}</span>
               </div>
               <!-- Text on the right -->
               <div class="slot-info">
                 <span class="slot-label">{{ slot.label }}</span>
-                <span class="slot-value">{{ slot.value ?? '—' }}</span>
+                <span class="slot-value">{{ slotValue(slot.id) ?? '—' }}</span>
               </div>
             </div>
           </div>
@@ -643,19 +996,65 @@ const slots = [
 
         <!-- Bottom: 3D preview -->
         <div class="pane-bottom">
-          <div class="panel-head"><span>模型预览区</span></div>
-          <div class="preview-empty view-empty">
-            <svg class="view-empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2l9 4.9V17L12 22 3 17V6.9L12 2z"/>
-              <path d="M12 22V12M3 7l9 5 9-5"/>
-            </svg>
-            <p class="view-empty__title">Three.js 预览区</p>
-            <p class="view-empty__desc">3D 模型预览功能开发中</p>
+          <div class="panel-head">
+            <span>模型预览区</span>
+            <button v-if="previewModelUrls.length" class="head-action-btn" @click="openExportDialog">导出配置</button>
           </div>
+          <ModelViewer ref="modelViewerRef" :model-urls="previewModelUrls" />
         </div>
 
       </div>
     </div>
+
+    <!-- ── Export config dialog ────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showExportDialog" class="export-backdrop" @click.self="showExportDialog = false">
+        <div class="export-dialog">
+          <h3 class="export-dialog-title">导出配置</h3>
+
+          <div class="export-row">
+            <span class="export-row-label">模型后缀</span>
+            <div class="export-pills">
+              <button
+                v-for="opt in MODEL_EXT_OPTS" :key="opt"
+                class="export-pill"
+                :class="{ active: exportModelExt === (opt === '默认' ? '' : opt) }"
+                @click="exportModelExt = opt === '默认' ? '' : opt"
+              >{{ opt }}</button>
+            </div>
+          </div>
+
+          <div class="export-row">
+            <span class="export-row-label">贴图后缀</span>
+            <div class="export-pills">
+              <button
+                v-for="opt in TEX_EXT_OPTS" :key="opt"
+                class="export-pill"
+                :class="{ active: exportTexExt === (opt === '默认' ? '' : opt) }"
+                @click="exportTexExt = opt === '默认' ? '' : opt"
+              >{{ opt }}</button>
+            </div>
+          </div>
+
+          <div class="export-row">
+            <span class="export-row-label">材质后缀</span>
+            <div class="export-pills">
+              <button
+                v-for="opt in MAT_EXT_OPTS" :key="opt"
+                class="export-pill"
+                :class="{ active: exportMatExt === (opt === '默认' ? '' : opt) }"
+                @click="exportMatExt = opt === '默认' ? '' : opt"
+              >{{ opt }}</button>
+            </div>
+          </div>
+
+          <div class="export-dialog-actions">
+            <button class="export-cancel-btn" @click="showExportDialog = false">取消</button>
+            <button class="export-confirm-btn" @click="doExport">导出</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -733,6 +1132,37 @@ const slots = [
 .sidebar-tab.active .tab-icon-wrap { background: var(--accent-muted); }
 
 .tab-label { font-size: 11px; font-weight: 500; line-height: 1; }
+
+.tab-frame-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sub-frame-icon {
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  object-fit: contain;
+}
+
+[data-theme="light"] .tab-frame-icon,
+[data-theme="light"] .sub-frame-icon {
+  filter: invert(1) brightness(0.75);
+}
+
+[data-theme="light"] .tab-icon-wrap {
+  background: rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .sidebar-tab.active .tab-icon-wrap {
+  background: var(--accent-muted);
+}
+
+[data-theme="light"] .sub-thumb {
+  background: rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .sub-tab.active .sub-thumb {
+  background: var(--accent-muted);
+}
 
 /* ── Sub-tab Bar ────────────────────────────────────────────── */
 .sub-tab-bar {
@@ -968,12 +1398,56 @@ const slots = [
 }
 [data-theme="light"] .item-card:hover { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1); }
 
+.item-card.equipped {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent) inset;
+}
+.item-card.equipped:hover { border-color: var(--accent); }
+
+.item-card.unselectable {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.item-card.unselectable:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--border-subtle);
+}
+
 .card-thumb {
   width: 100%;
   height: 100%;
   min-width: 0;
   position: relative;
   overflow: hidden;
+}
+
+.card-thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* ── Suit cards ─────────────────────────────────────────────── */
+.suit-thumb-img {
+  object-fit: contain;
+}
+
+.suit-grade-badge {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
 }
 
 /* ── Variant colour swatches ────────────────────────────────── */
@@ -1020,10 +1494,17 @@ const slots = [
   background: rgba(0, 0, 0, 0.42);
   color: rgba(255, 255, 255, 0.9);
 }
+.asset-tag:not(.missing) {
+  cursor: pointer;
+}
+.asset-tag:not(.missing):hover {
+  background: rgba(255, 255, 255, 0.22);
+}
 .asset-tag.missing {
   background: rgba(0, 0, 0, 0.25);
   color: rgba(255, 255, 255, 0.35);
   text-decoration: line-through;
+  cursor: default;
 }
 
 .card-footer {
@@ -1126,6 +1607,8 @@ const slots = [
 }
 .outfit-slot:hover { border-color: var(--border); background: var(--bg-hover); }
 .outfit-slot.equipped { border-color: var(--accent-border); background: var(--accent-muted); }
+.outfit-slot.required { cursor: default; }
+.outfit-slot.required.equipped:hover { border-color: var(--accent-border); background: var(--accent-muted); }
 
 /* Square icon placeholder on the left */
 .slot-thumb {
@@ -1143,6 +1626,7 @@ const slots = [
 }
 .outfit-slot.equipped .slot-thumb { background: rgba(124, 106, 247, 0.12); }
 .slot-thumb-icon { line-height: 1; }
+.slot-thumb-img { width: 100%; height: 100%; object-fit: contain; }
 
 /* Text column on the right */
 .slot-info {
@@ -1171,5 +1655,140 @@ const slots = [
 .outfit-slot.equipped .slot-value { color: var(--text-primary); font-weight: 500; }
 
 /* ── Preview Empty ──────────────────────────────────────────── */
-.preview-empty { flex: 1; }
+
+/* ── Scan states ────────────────────────────────────────────── */
+.scan-empty {
+  flex: 1;
+  margin: 8px;
+  border-radius: var(--r-md);
+  border: 1px dashed var(--border-subtle);
+}
+
+.scan-btn {
+  flex-shrink: 0;
+  height: 28px;
+  min-width: 52px;
+  text-align: center;
+}
+.scan-btn.scanning { color: var(--accent-hover); }
+
+.scan-progress-ring {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.grid-empty {
+  grid-column: 1 / -1;
+  padding: 32px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Export dialog ──────────────────────────────────────────── */
+.export-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.export-dialog {
+  width: 400px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 22px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.export-dialog-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.export-row-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  width: 56px;
+  flex-shrink: 0;
+}
+
+.export-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.export-pill {
+  padding: 3px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: var(--bg-active);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t), color var(--t), border-color var(--t);
+}
+.export-pill:hover { background: var(--bg-hover); color: var(--text-primary); }
+.export-pill.active {
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+  color: var(--accent-hover);
+}
+
+.export-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.export-cancel-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  background: var(--bg-active);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+}
+.export-cancel-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.export-confirm-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--r-sm);
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-hover);
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+}
+.export-confirm-btn:hover { background: var(--accent); color: #fff; }
 </style>

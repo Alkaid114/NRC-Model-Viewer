@@ -5,6 +5,13 @@ const HIDDEN_CONFIG_KEY = 'nrc_mv_config_hidden'
 // Keys are arbitrary labels set by the consumer (e.g. 'configFiles').
 const _dirHandles = new Map()
 
+let _fsWarnedOnce = false
+function _warnFsNotConnected(method) {
+  if (_fsWarnedOnce) return
+  _fsWarnedOnce = true
+  console.warn(`[WebPlatform] ${method}: file system not connected — call openDirectory first.`)
+}
+
 export class WebPlatform {
   get name() { return 'web' }
 
@@ -31,13 +38,13 @@ export class WebPlatform {
   // These stubs return null/empty and log a warning.
   // Full implementation will use stored _dirHandles.
 
-  async readFile(virtualPath, _encoding = 'utf-8') {
-    console.warn('[WebPlatform] readFile not yet implemented:', virtualPath)
+  async readFile(_virtualPath, _encoding = 'utf-8') {
+    _warnFsNotConnected('readFile')
     return null
   }
 
-  async readDir(virtualPath) {
-    console.warn('[WebPlatform] readDir not yet implemented:', virtualPath)
+  async readDir(_virtualPath) {
+    _warnFsNotConnected('readDir')
     return []
   }
 
@@ -46,6 +53,14 @@ export class WebPlatform {
   }
 
   // ── Dialog ────────────────────────────────────────────────────────────────
+
+  async openPath(_targetPath) {
+    // No-op in web context; OS path navigation is not available.
+  }
+
+  setDevTools(_enabled) {
+    // No-op in web context.
+  }
 
   async openDirectory() {
     if (!('showDirectoryPicker' in window)) {
@@ -66,5 +81,9 @@ export class WebPlatform {
 
   joinPath(...parts) {
     return parts.filter(Boolean).join('/').replace(/\/+/g, '/')
+  }
+
+  fileUrl(_absPath) {
+    return null
   }
 }

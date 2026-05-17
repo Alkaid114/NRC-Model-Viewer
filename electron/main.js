@@ -1,6 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron')
+const { exec } = require('child_process')
 const path = require('path')
 const fs = require('fs').promises
+
+// Allow renderer to load local files via nrcfile:/// without cross-origin blocks.
+// Must be called before app is ready.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'nrcfile', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
+])
 
 const isDev = process.argv.includes('--dev')
 
@@ -37,13 +44,21 @@ function createWindow() {
       })
     }
     tryLoad(10)
-    win.webContents.openDevTools()
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+  // Open DevTools if devMode was enabled in the last session.
+  fs.readFile(getHiddenConfigPath(), 'utf-8')
+    .then(data => { if (JSON.parse(data)?.devMode) win.webContents.openDevTools() })
+    .catch(() => {})
 }
 
 app.whenReady().then(() => {
+  protocol.handle('nrcfile', (request) => {
+    const encoded = request.url.slice('nrcfile:///'.length)
+    return net.fetch('file:///' + encoded)
+  })
+
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -105,4 +120,19 @@ ipcMain.handle('dialog:openDirectory', async (event) => {
     properties: ['openDirectory']
   })
   return result.canceled ? null : result.filePaths[0]
+})
+
+// ── DevTools IPC ──────────────────────────────────────────────────────────────
+
+ipcMain.handle('devtools:set', (event, enabled) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (enabled) win.webContents.openDevTools()
+  else win.webContents.closeDevTools()
+})
+
+// ── Shell IPC ─────────────────────────────────────────────────────────────────
+
+ipcMain.handle('shell:openPath', (_, targetPath) => {
+  // /root prevents Explorer from expanding the full navigation tree, avoiding lag on deep paths.
+  exec(`explorer.exe /root,"${targetPath}"`)
 })

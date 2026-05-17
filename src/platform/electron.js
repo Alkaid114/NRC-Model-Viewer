@@ -28,10 +28,22 @@ export class ElectronPlatform {
     return window.electronAPI.openDirectory()
   }
 
+  openPath(targetPath) {
+    return window.electronAPI.openPath?.(targetPath)
+  }
+
+  setDevTools(enabled) {
+    return window.electronAPI.setDevTools(enabled)
+  }
+
   // ── Path Utilities ────────────────────────────────────────────────────────
   // Normalise to backslashes for Windows paths.
 
   joinPath(...parts) {
     return parts.filter(Boolean).join('\\').replace(/[/\\]+/g, '\\')
+  }
+
+  fileUrl(absPath) {
+    return 'nrcfile:///' + encodeURI(absPath.replace(/\\/g, '/'))
   }
 }

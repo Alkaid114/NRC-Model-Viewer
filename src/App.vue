@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watchEffect, defineAsyncComponent } from 'vue'
+import { ref, computed, onMounted, watchEffect, defineAsyncComponent } from 'vue'
 import { initConfig, config } from './store/config.js'
 
 const CostumeView  = defineAsyncComponent(() => import('./views/CostumeView.vue'))
@@ -16,6 +16,9 @@ const tabs = [
   { id: 'npc',     label: 'NPC' },
   { id: 'sprite',  label: '精灵' },
 ]
+
+const _viewMap = { costume: CostumeView, npc: NpcView, sprite: SpriteView }
+const currentView = computed(() => showSettings.value ? SettingsView : _viewMap[activeTab.value])
 
 function setTab(id) {
   activeTab.value    = id
@@ -91,10 +94,9 @@ watchEffect(() => {
     <!-- ── Content ──────────────────────────────────────────────── -->
     <main class="content">
       <Transition name="fade" mode="out-in">
-        <SettingsView v-if="showSettings"  key="settings" />
-        <CostumeView  v-else-if="activeTab === 'costume'" key="costume" />
-        <NpcView      v-else-if="activeTab === 'npc'"     key="npc" />
-        <SpriteView   v-else-if="activeTab === 'sprite'"  key="sprite" />
+        <KeepAlive>
+          <component :is="currentView" />
+        </KeepAlive>
       </Transition>
     </main>
   </div>

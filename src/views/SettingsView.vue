@@ -136,27 +136,6 @@ async function browse(dotPath) {
               </div>
             </div>
 
-            <div class="setting-item">
-              <div class="setting-label">
-                <span class="label-text">导出工具</span>
-                <span class="label-hint">决定材质配置文件的读取格式</span>
-              </div>
-              <div class="radio-group">
-                <label class="radio-option" :class="{ 'radio-option--checked': config.modelExporter === 'fmodel' }">
-                  <input type="radio" v-model="config.modelExporter" value="fmodel" />
-                  <span class="radio-dot"></span>
-                  <span class="radio-label">FModel</span>
-                  <span class="radio-hint">JSON 格式材质配置</span>
-                </label>
-                <label class="radio-option" :class="{ 'radio-option--checked': config.modelExporter === 'ueviewer' }">
-                  <input type="radio" v-model="config.modelExporter" value="ueviewer" />
-                  <span class="radio-dot"></span>
-                  <span class="radio-label">UEViewer</span>
-                  <span class="radio-hint">props.txt 格式材质配置</span>
-                </label>
-              </div>
-            </div>
-
           </div>
         </section>
 
@@ -184,11 +163,50 @@ async function browse(dotPath) {
 
               <div class="setting-item setting-item--row">
                 <div class="setting-label">
-                  <span class="label-text">显示资源路径</span>
-                  <span class="label-hint">在卡片上展示文件的实际路径</span>
+                  <span class="label-text">显示资产类型标签</span>
+                  <span class="label-hint">在卡片缩略图上显示 Model / Tex / Mat 标签</span>
                 </div>
                 <label class="toggle">
-                  <input type="checkbox" v-model="hiddenConfig.showAssetPaths" />
+                  <input type="checkbox" v-model="hiddenConfig.showAssetTags" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">隐藏缺失资产标签</span>
+                  <span class="label-hint">关闭时缺失资产显示删除线，开启时直接隐藏</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.hideMissingAssets" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">贴图缩略图兜底</span>
+                  <span class="label-hint">无配置图标时，尝试用 D 贴图作为卡片缩略图</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.texFallback" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">显示未识别物品</span>
+                  <span class="label-hint">显示在配置文件中没有对应记录的物品（名称显示为 ID 数字）</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.showUnconfedItems" />
                   <span class="toggle-track">
                     <span class="toggle-thumb"></span>
                   </span>
