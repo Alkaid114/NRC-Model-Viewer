@@ -407,7 +407,7 @@ async function _baseTexturesFromFModelJson(dirPath, re) {
         const texParams = props?.TextureParameterValues ?? []
         const base = texParams.find(p => p?.ParameterInfo?.Name === 'BaseTex')
         const objectPath = base?.ParameterValue?.ObjectPath
-        const texMatch = objectPath?.match(/NRC\/Content\/(.+?)\.\d+$/)
+        const texMatch = objectPath?.match(/NRC\/(Content\/.+?)\.\d+$/)
         if (texMatch) {
           const rel = texMatch[1].replace(/\//g, '\\') + '.png'
           result[m[1]] = rel

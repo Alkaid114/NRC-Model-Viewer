@@ -22,6 +22,10 @@ export const hiddenConfig = reactive({
   hideMissingAssets: false,
   texFallback: false,
   showUnconfedItems: false,
+  spriteShowAssetTags: false,
+  spriteHideMissingAssets: true,
+  spriteTexFallback: false,
+  spriteShowNonHandbook: false,
 })
 
 // ── Persistence ───────────────────────────────────────────────────────────────

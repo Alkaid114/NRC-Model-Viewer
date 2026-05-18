@@ -31,8 +31,9 @@ export function modelTextureUrl(item, texType, texId) {
 }
 
 export function baseTextureUrl(item, matId) {
-  const rel = item?.baseTextureByMatId?.[matId]
+  let rel = item?.baseTextureByMatId?.[matId]
   if (!rel) return null
+  if (/^ArtRes[\\/]/i.test(rel)) rel = platform.joinPath('Content', rel)
   return platform.fileUrl(platform.joinPath(config.paths.models, rel))
 }
 

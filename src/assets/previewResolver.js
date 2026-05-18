@@ -63,7 +63,8 @@ export function previewEntryFor(item, context) {
   if (mainTex) textureByMaterialName[`MI_${item.gender}_${item.type}_${modelId}`] = mainTex
   for (const matId of Object.keys(item.baseTextureByMatId ?? {})) {
     const matTex = baseTextureUrl(item, matId)
-    if (matTex) textureByMaterialName[`MI_${item.gender}_${item.type}_${matId}`] = matTex
+    const matName = `MI_${item.gender}_${item.type}_${matId}`
+    if (matTex && !textureByMaterialName[matName]) textureByMaterialName[matName] = matTex
   }
 
   const skinTex = _usesBodySkinMaterial(item) ? _skinTextureUrl(gender, outfit.sk) : null

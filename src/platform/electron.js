@@ -32,6 +32,10 @@ export class ElectronPlatform {
     return window.electronAPI.openPath?.(targetPath)
   }
 
+  openExternal(url) {
+    return window.electronAPI.openExternal?.(url)
+  }
+
   setDevTools(enabled) {
     return window.electronAPI.setDevTools(enabled)
   }

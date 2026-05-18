@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } = require('electron')
 const { exec } = require('child_process')
 const path = require('path')
 const fs = require('fs').promises
@@ -31,6 +31,7 @@ function createWindow() {
       nodeIntegration: false,
     },
     backgroundColor: '#0d1117',
+    autoHideMenuBar: true,
     show: false,
   })
 
@@ -136,3 +137,5 @@ ipcMain.handle('shell:openPath', (_, targetPath) => {
   // /root prevents Explorer from expanding the full navigation tree, avoiding lag on deep paths.
   exec(`explorer.exe /root,"${targetPath}"`)
 })
+
+ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))

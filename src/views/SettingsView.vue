@@ -64,9 +64,9 @@ async function browse(dotPath) {
           </div>
         </section>
 
-        <!-- ── 配置设置 ─────────────────────────────────────── -->
+        <!-- ── 路径配置 ─────────────────────────────────────── -->
         <section class="settings-section">
-          <h2 class="section-title">配置设置</h2>
+          <h2 class="section-title">路径配置</h2>
           <div class="settings-group">
 
             <div class="setting-item">
@@ -86,14 +86,6 @@ async function browse(dotPath) {
               </div>
             </div>
 
-          </div>
-        </section>
-
-        <!-- ── UI 资源设置 ──────────────────────────────────── -->
-        <section class="settings-section">
-          <h2 class="section-title">UI 资源设置</h2>
-          <div class="settings-group">
-
             <div class="setting-item">
               <div class="setting-label">
                 <span class="label-text">UI 资源根目录</span>
@@ -110,14 +102,6 @@ async function browse(dotPath) {
                 <button class="browse-btn" @click="browse('paths.uiAssets')">浏览…</button>
               </div>
             </div>
-
-          </div>
-        </section>
-
-        <!-- ── 模型设置 ─────────────────────────────────────── -->
-        <section class="settings-section">
-          <h2 class="section-title">模型设置</h2>
-          <div class="settings-group">
 
             <div class="setting-item">
               <div class="setting-label">
@@ -146,8 +130,9 @@ async function browse(dotPath) {
               隐藏设置
               <span class="dev-badge">DEV</span>
             </h2>
-            <div class="settings-group">
 
+            <!-- 开发者模式 -->
+            <div class="settings-group">
               <div class="setting-item setting-item--row">
                 <div class="setting-label">
                   <span class="label-text">开发者模式</span>
@@ -160,6 +145,11 @@ async function browse(dotPath) {
                   </span>
                 </label>
               </div>
+            </div>
+
+            <!-- 服装功能 -->
+            <h3 class="sub-section-title">服装功能</h3>
+            <div class="settings-group">
 
               <div class="setting-item setting-item--row">
                 <div class="setting-label">
@@ -214,6 +204,65 @@ async function browse(dotPath) {
               </div>
 
             </div>
+
+            <!-- 精灵功能 -->
+            <h3 class="sub-section-title">精灵功能</h3>
+            <div class="settings-group">
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">显示资产类型标签</span>
+                  <span class="label-hint">在卡片缩略图上显示 Model / Tex / Mat 标签</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.spriteShowAssetTags" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">隐藏缺失资产标签</span>
+                  <span class="label-hint">关闭时缺失资产显示删除线，开启时直接隐藏</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.spriteHideMissingAssets" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">贴图缩略图兜底</span>
+                  <span class="label-hint">无配置图标时，尝试用 D 贴图作为卡片缩略图</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.spriteTexFallback" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="setting-item setting-item--row">
+                <div class="setting-label">
+                  <span class="label-text">显示图鉴外的精灵</span>
+                  <span class="label-hint">开启后额外显示 petbase_id 不在图鉴中的精灵</span>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" v-model="hiddenConfig.spriteShowNonHandbook" />
+                  <span class="toggle-track">
+                    <span class="toggle-thumb"></span>
+                  </span>
+                </label>
+              </div>
+
+            </div>
+
           </section>
         </Transition>
 
@@ -477,6 +526,26 @@ async function browse(dotPath) {
 .toggle input:checked + .toggle-track .toggle-thumb {
   transform: translateX(16px);
   background: var(--accent);
+}
+
+/* ── Sub-section title (within hidden section) ──────────────── */
+.sub-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin: 20px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--accent-border);
+}
+
+/* ── Section note ───────────────────────────────────────────── */
+.section-note {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
 }
 
 /* ── Hidden section ─────────────────────────────────────────── */

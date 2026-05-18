@@ -1,18 +1,20 @@
 <script setup>
 import { ref, computed, onMounted, watchEffect, defineAsyncComponent } from 'vue'
 import { initConfig, config } from './store/config.js'
+import { platform } from './platform/index.js'
 
 const CostumeView  = defineAsyncComponent(() => import('./views/CostumeView.vue'))
 const NpcView      = defineAsyncComponent(() => import('./views/NpcView.vue'))
 const SpriteView   = defineAsyncComponent(() => import('./views/SpriteView.vue'))
 const SettingsView = defineAsyncComponent(() => import('./views/SettingsView.vue'))
 
+const appVersion   = __APP_VERSION__
 const activeTab    = ref('costume')
 const showSettings = ref(false)
 
 // Add new entries here to extend the tab bar.
 const tabs = [
-  { id: 'costume', label: '换装' },
+  { id: 'costume', label: '服装' },
   { id: 'npc',     label: 'NPC' },
   { id: 'sprite',  label: '精灵' },
 ]
@@ -28,6 +30,23 @@ function setTab(id) {
 function toggleSettings() {
   showSettings.value = !showSettings.value
 }
+
+const SOCIAL_LINKS = [
+  {
+    id: 'bilibili',
+    label: 'Bilibili · 浅草疏影',
+    url: 'https://space.bilibili.com/35970397',
+    // Bilibili TV icon
+    svg: 'M17.813 4.653h.854c1.51.054 2.769.578 3.773 1.574 1.004.995 1.524 2.249 1.56 3.76v7.36c-.036 1.51-.556 2.769-1.56 3.773s-2.262 1.524-3.773 1.56H5.333c-1.51-.036-2.769-.556-3.773-1.56S.036 18.858 0 17.347v-7.36c.036-1.511.556-2.765 1.56-3.76 1.004-.996 2.262-1.52 3.773-1.574h.774l-1.174-1.12a1.234 1.234 0 0 1-.373-.906c0-.356.124-.658.373-.907l.027-.027c.267-.249.573-.373.92-.373.347 0 .653.124.92.373L8.12 3.933h7.68l1.867-1.867c.267-.249.573-.373.92-.373.347 0 .662.151.907.373.249.267.373.564.373.92s-.124.645-.373.906zM5.333 7.24c-.746.018-1.373.276-1.88.773-.506.498-.769 1.13-.786 1.894v7.52c.017.764.28 1.395.786 1.893.507.498 1.134.756 1.88.773h13.334c.746-.017 1.373-.275 1.88-.773.506-.498.769-1.13.786-1.893v-7.52c-.017-.765-.28-1.396-.786-1.894-.507-.497-1.134-.755-1.88-.773zM8 11.107c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c0-.373.129-.689.386-.947.258-.257.574-.386.947-.386zm8 0c.373 0 .684.124.933.373.25.249.383.569.4.96v1.173c-.017.391-.15.711-.4.96-.249.25-.56.374-.933.374s-.684-.125-.933-.374c-.25-.249-.383-.569-.4-.96V12.44c.017-.391.15-.711.4-.96.249-.249.56-.373.933-.373z',
+  },
+  {
+    id: 'github',
+    label: 'GitHub · SparseShadow2024',
+    url: 'https://github.com/SparseShadow2024',
+    // GitHub mark icon
+    svg: 'M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12',
+  },
+]
 
 onMounted(async () => {
   await initConfig()
@@ -45,7 +64,10 @@ watchEffect(() => {
     <header class="tab-bar">
       <div class="app-brand">
         <span class="brand-logo">◈</span>
-        <span class="brand-name">NRC Model Viewer</span>
+        <div class="brand-text">
+          <span class="brand-name">NRC Model Viewer</span>
+          <span class="brand-meta">v{{ appVersion }} · By 疏影</span>
+        </div>
       </div>
 
       <nav class="tabs" role="tablist">
@@ -94,10 +116,26 @@ watchEffect(() => {
     <!-- ── Content ──────────────────────────────────────────────── -->
     <main class="content">
       <Transition name="fade" mode="out-in">
-        <KeepAlive>
-          <component :is="currentView" />
-        </KeepAlive>
+        <component :is="currentView" />
       </Transition>
     </main>
+
+    <!-- ── Bottom Bar ──────────────────────────────────────────── -->
+    <footer class="bottom-bar">
+      <div class="bottom-bar-social">
+        <button
+          v-for="link in SOCIAL_LINKS"
+          :key="link.id"
+          class="social-btn"
+          :title="link.label"
+          @click="platform.openExternal(link.url)"
+        >
+          <svg class="social-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path :d="link.svg" />
+          </svg>
+          <span>{{ link.label }}</span>
+        </button>
+      </div>
+    </footer>
   </div>
 </template>

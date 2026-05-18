@@ -36,9 +36,17 @@
     "extraMetadata": {
       "main": "electron/main.js"
     },
+    "asar": true,
     "win": {
-      "target": "nsis",
-      "icon": "public/icon.ico"
+      "target": [
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-v${version}-portable.exe"
+    },
+    "portable": {
+      "requestExecutionLevel": "user",
+      "unpackDirName": "nrc-model-viewer"
     }
   }
 }

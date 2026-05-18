@@ -1000,7 +1000,7 @@ function doExport() {
             <span>模型预览区</span>
             <button v-if="previewModelUrls.length" class="head-action-btn" @click="openExportDialog">导出配置</button>
           </div>
-          <ModelViewer ref="modelViewerRef" :model-urls="previewModelUrls" />
+          <ModelViewer ref="modelViewerRef" :model-urls="previewModelUrls" watermark="5huY1n6" />
         </div>
 
       </div>

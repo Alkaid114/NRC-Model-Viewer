@@ -58,6 +58,10 @@ export class WebPlatform {
     // No-op in web context; OS path navigation is not available.
   }
 
+  openExternal(url) {
+    window.open(url, '_blank', 'noopener')
+  }
+
   setDevTools(_enabled) {
     // No-op in web context.
   }

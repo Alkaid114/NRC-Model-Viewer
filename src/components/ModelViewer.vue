@@ -6,7 +6,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { MATERIAL_FOLDERS } from '../assets/costumeRules.js'
 
 const props = defineProps({
-  modelUrls: { type: Array, default: () => [] },
+  modelUrls:  { type: Array,  default: () => [] },
+  watermark:  { type: String, default: '' },
 })
 
 const canvasEl  = ref(null)
@@ -15,6 +16,7 @@ const hasModels = ref(false)
 const _resolvedMaterials = reactive({})
 
 let renderer, scene, camera, controls, animId
+let hudScene = null, hudCamera = null, hudSprite = null
 const loader     = new GLTFLoader()
 const texLoader  = new THREE.TextureLoader()
 // key (slot ID or URL fallback) → { model: Object3D, url: string }
@@ -31,6 +33,8 @@ function _entryTextureSignature(entry) {
     texDirName: entry?.texDirName ?? null,
     textureByMaterialName: entry?.textureByMaterialName ?? null,
     attachToBone: entry?.attachToBone ?? null,
+    texFolderUrl: entry?.texFolderUrl ?? null,
+    byTexUrl: entry?.byTexUrl ?? null,
   })
 }
 
@@ -54,7 +58,7 @@ function _parseModelUrl(modelUrl) {
     gender: m[2],
     type: m[3],
     id: m[4],
-    folderUrl: `${m[1]}/${m[2]}/Avatar/${m[3]}/${m[4]}`,
+    folderUrl: raw.slice(0, raw.lastIndexOf('/')),
   }
 }
 
@@ -73,6 +77,32 @@ function _parseMaterialSlot(materialName) {
     }
   }
   return type ? { type, id, gender } : null
+}
+
+// Slot codes that get a D-texture. Es/Mh keep their GLB alpha; By ignores it.
+const _PET_TEXTURED_SLOTS = new Set(['By', 'Es', 'Mh'])
+const _PET_KEEP_ALPHA_SLOTS = new Set(['Es', 'Mh'])
+
+// For pet models: find the per-slot D-texture in the Tex folder.
+// Material name pattern: MI_<PetName>_<SlotCode>
+// Slots not in _PET_TEXTURED_SLOTS (Fx, Ol, …) return [] → _normalizeMat handles them.
+function _petTextureFallbacks(mat, entry) {
+  if (!entry?.texFolderUrl && !entry?.baseTexFolderUrl) return []
+  const matCore = (mat?.name ?? '').replace(/^MI?_/, '')
+  const m = matCore.match(/_([A-Za-z]{2,4}\d*)$/)
+  if (!m || !_PET_TEXTURED_SLOTS.has(m[1])) return []
+  const slot = m[1]
+  const petName = matCore.slice(0, matCore.length - m[0].length)
+  const keepAlpha = _PET_KEEP_ALPHA_SLOTS.has(slot)
+  // By: prefer explicit byTexUrl (scanner-resolved real filename for Yise variants),
+  // then fall back to folder-based guess.
+  // Es/Mh: always use base Tex (Yise only changes body color).
+  if (slot === 'By' && entry.byTexUrl) return [{ url: entry.byTexUrl, keepAlpha }]
+  const folderUrl = (slot !== 'By' && entry.baseTexFolderUrl)
+    ? entry.baseTexFolderUrl
+    : entry.texFolderUrl
+  if (!folderUrl) return []
+  return [{ url: `${folderUrl.replace(/\/+$/, '')}/T_${petName}_${slot}_D.png`, keepAlpha }]
 }
 
 function _textureCandidatesForMaterial(mat, entry) {
@@ -164,6 +194,14 @@ function _normalizeMat(mat) {
     mat.color.set(1, 1, 1)
     dirty = true
   }
+  // Strip GLB-embedded alphaMode:MASK / BLEND so materials render opaque.
+  if (mat.transparent || mat.alphaTest > 0 || mat.alphaMap) {
+    mat.transparent = false
+    mat.alphaTest   = 0
+    mat.alphaMap    = null
+    mat.depthWrite  = true
+    dirty = true
+  }
   const hadPhysics = mat.metalness !== 0 || mat.metalnessMap || mat.roughness !== 1 || mat.roughnessMap
   _applyPhysicsDefaults(mat)
   if (hadPhysics) dirty = true
@@ -227,11 +265,13 @@ function _patchMat(mat, textureInfo) {
   next.map          = textureInfo.texture ?? null
   next.color?.set(textureInfo.texture ? 0xffffff : textureInfo.color)
   next.vertexColors = false
-  next.transparent  = false
-  next.opacity      = 1
-  next.alphaMap     = null
-  next.alphaTest    = 0
-  next.depthWrite   = true
+  if (!textureInfo.options?.keepAlpha) {
+    next.transparent  = false
+    next.opacity      = 1
+    next.alphaMap     = null
+    next.alphaTest    = 0
+    next.depthWrite   = true
+  }
   _applyPhysicsDefaults(next)
   _patchUvRepeatShader(next, textureInfo.options?.uvRepeat)
   _patchOverlayTextureShader(next, textureInfo.options?.overlayTexture)
@@ -254,6 +294,7 @@ async function _applyTextures(model, entry) {
   await Promise.all([...materials].map(async mat => {
     let urls = _textureCandidatesForMaterial(mat, entry)
     if (!urls.length && typeof entry === 'string') urls = [_fallbackDTexUrl(entry)].filter(Boolean)
+    if (!urls.length) urls = _petTextureFallbacks(mat, entry)
     const textureInfo = await _loadFirstTexture(urls, textureCache)
     if (textureInfo) {
       materialToTexture.set(mat, textureInfo)
@@ -285,10 +326,55 @@ async function _applyTextures(model, entry) {
   return resolution
 }
 
+// ── HUD watermark (rendered into the WebGL canvas, not a DOM overlay) ─────────
+
+function _buildWatermarkCanvas(text) {
+  const dpr = window.devicePixelRatio || 1
+  const W = 256, H = 10
+  const canvas = document.createElement('canvas')
+  canvas.width  = Math.round(W * dpr)
+  canvas.height = Math.round(H * dpr)
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+  ctx.clearRect(0, 0, W, H)
+  ctx.font = '500 11px "Segoe UI", system-ui, sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.1)'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, 0, H / 2)
+  return { canvas, logicalW: W, logicalH: H }
+}
+
+function _initHud(text) {
+  if (hudSprite) { hudSprite.material.map?.dispose(); hudSprite.material.dispose() }
+  hudScene = null; hudSprite = null
+  if (!text) return
+  const { canvas, logicalW, logicalH } = _buildWatermarkCanvas(text)
+  const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthTest: false })
+  hudSprite = new THREE.Sprite(mat)
+  hudSprite.userData.logicalW = logicalW
+  hudSprite.userData.logicalH = logicalH
+  hudCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  hudScene  = new THREE.Scene()
+  hudScene.add(hudSprite)
+  _updateHudLayout()
+}
+
+function _updateHudLayout() {
+  if (!hudSprite || !renderer) return
+  const size = renderer.getSize(new THREE.Vector2())
+  if (!size.x || !size.y) return
+  const { logicalW, logicalH } = hudSprite.userData
+  const hudW = 2 * logicalW / size.x
+  const hudH = 2 * logicalH / size.y
+  hudSprite.scale.set(hudW, hudH, 1)
+  hudSprite.position.set(-1 + hudW / 2 + 28 / size.x, -1 + hudH / 2 + 28 / size.y, 0)
+}
+
 function initThree() {
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl.value, antialias: true })
   renderer.setPixelRatio(window.devicePixelRatio)
   renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.autoClear = false
 
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x18191e)
@@ -298,6 +384,8 @@ function initThree() {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.08
+
+  _initHud(props.watermark)
 
   scene.add(new THREE.AmbientLight(0xffffff, 1.2))
   const key = new THREE.DirectionalLight(0xfff4e0, 2.0)
@@ -310,19 +398,30 @@ function initThree() {
   animate()
 }
 
+let _canvasW = 0, _canvasH = 0
+
 function animate() {
   animId = requestAnimationFrame(animate)
+  // Resize inside the render loop so the canvas is never cleared without an
+  // immediate redraw — avoids background-flash on window resize.
+  if (canvasEl.value) {
+    const w = canvasEl.value.clientWidth
+    const h = canvasEl.value.clientHeight
+    if (w > 0 && h > 0 && (w !== _canvasW || h !== _canvasH)) {
+      _canvasW = w; _canvasH = h
+      renderer.setSize(w, h, false)
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+      _updateHudLayout()
+    }
+  }
   controls.update()
+  renderer.clear()
   renderer.render(scene, camera)
-}
-
-function onResize() {
-  if (!renderer || !canvasEl.value) return
-  const { clientWidth: w, clientHeight: h } = canvasEl.value
-  if (w === 0 || h === 0) return
-  renderer.setSize(w, h, false)
-  camera.aspect = w / h
-  camera.updateProjectionMatrix()
+  if (hudScene) {
+    renderer.clearDepth()
+    renderer.render(hudScene, hudCamera)
+  }
 }
 
 function disposeObject(obj) {
@@ -487,20 +586,17 @@ async function updateModels(entries) {
 }
 
 watch(() => props.modelUrls, updateModels, { deep: true })
+watch(() => props.watermark, text => { if (renderer) _initHud(text) })
 
-let ro
 onMounted(() => {
   initThree()
-  onResize()
-  ro = new ResizeObserver(onResize)
-  ro.observe(canvasEl.value.parentElement)
   if (props.modelUrls.length) updateModels(props.modelUrls)
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(animId)
-  ro?.disconnect()
   clearModels()
+  _initHud('')  // dispose HUD textures
   controls?.dispose()
   renderer?.dispose()
 })
@@ -516,7 +612,7 @@ defineExpose({ resolvedMaterials: _resolvedMaterials })
     </div>
     <div v-else-if="!modelUrls.length" class="model-overlay view-empty">
       <p class="view-empty__title">暂无模型</p>
-      <p class="view-empty__desc">从选择区选择服装以预览</p>
+      <p class="view-empty__desc">从选择区选择以预览</p>
     </div>
     <button v-if="hasModels && !isLoading" class="viewer-btn viewer-btn--reset" title="还原视角" @click="resetView">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
