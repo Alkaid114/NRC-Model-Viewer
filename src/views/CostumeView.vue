@@ -167,6 +167,21 @@ function measureOutfitSlotsContentWidth() {
   return outfitSlots.value.clientWidth - paddingInline
 }
 
+function attachGridObserver(el) {
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
+  if (!el) {
+    itemGridContentWidth.value = 0
+    return
+  }
+
+  itemGridContentWidth.value = measureGridContentWidth()
+  gridResizeObserver = new ResizeObserver(() => {
+    itemGridContentWidth.value = measureGridContentWidth()
+  })
+  gridResizeObserver.observe(el)
+}
+
 // Measure the sub-tab bar's natural (unconstrained) content width.
 // Temporarily sets width to max-content for an accurate read, then restores.
 // Called on mount and whenever the active L1 tab changes.
@@ -188,12 +203,7 @@ onMounted(() => {
     })
     layoutResizeObserver.observe(layoutRoot.value)
   }
-  if (!itemGrid.value) return
-  itemGridContentWidth.value = measureGridContentWidth()
-  gridResizeObserver = new ResizeObserver(([entry]) => {
-    itemGridContentWidth.value = entry.contentRect.width
-  })
-  gridResizeObserver.observe(itemGrid.value)
+  attachGridObserver(itemGrid.value)
   if (outfitSlots.value) {
     outfitSlotsContentWidth.value = measureOutfitSlotsContentWidth()
     outfitResizeObserver = new ResizeObserver(([entry]) => {
@@ -203,6 +213,9 @@ onMounted(() => {
   }
   measureSubTabBar()
 })
+
+// itemGrid only exists after a scan completes, so wire it when Vue renders it.
+watch(itemGrid, attachGridObserver)
 
 onUnmounted(() => {
   layoutResizeObserver?.disconnect()
@@ -361,6 +374,7 @@ function swatchColor(v, idx) {
 // ── Tab → type filters ────────────────────────────────────────────────────────
 
 const searchText = ref('')
+const hasConfEntries = computed(() => costumeStore.items.some(i => i.hasConf))
 
 const displayedItems = computed(() => {
   if (!costumeStore.scanned) return []
@@ -371,7 +385,7 @@ const displayedItems = computed(() => {
   )
 
   // Hide items with no conf entry unless the user explicitly enables them.
-  if (!hiddenConfig.showUnconfedItems) {
+  if (!hiddenConfig.showUnconfedItems && hasConfEntries.value) {
     items = items.filter(i => i.hasConf)
   }
 
@@ -632,10 +646,18 @@ function _rel(winPath, root) {
   return winPath.startsWith(prefix) ? winPath.slice(prefix.length) : winPath
 }
 
-function _replaceExt(path, newExt) {
-  if (!path || !newExt) return path
+function _getExt(path) {
+  if (!path) return ''
   const dot = path.lastIndexOf('.')
-  return dot >= 0 ? path.slice(0, dot) + newExt : path + newExt
+  const sep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return dot > sep ? path.slice(dot) : ''
+}
+
+function _stripExt(path) {
+  if (!path) return path
+  const dot = path.lastIndexOf('.')
+  const sep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return dot > sep ? path.slice(0, dot) : path
 }
 
 // Derive the Mat\ path from the texture path: replace Tex\{file} → Mat\{matName}.{ext}
@@ -660,9 +682,6 @@ function openExportDialog() { showExportDialog.value = true }
 
 function doExport() {
   showExportDialog.value = false
-  const mExt   = exportModelExt.value
-  const tExt   = exportTexExt.value
-  const matExt = exportMatExt.value || costumeStore.matFileExt || '.json'
   const resolved = modelViewerRef.value?.resolvedMaterials ?? {}
 
   let avatarRoot = null
@@ -671,28 +690,42 @@ function doExport() {
     if (avatarRoot) break
   }
 
+  // Derive effective extensions: user override → actual file ext → fallback
+  const firstModelWin = _toWinPath(previewModelUrls.value[0]?.url)
+  const effectiveModelExt = exportModelExt.value || _getExt(firstModelWin) || '.glb'
+
+  let firstTexWin = null
+  outer: for (const entry of previewModelUrls.value) {
+    for (const info of Object.values(resolved[entry.key] ?? {})) {
+      if (info?.url) { firstTexWin = _toWinPath(info.url); break outer }
+    }
+  }
+  const effectiveTexExt = exportTexExt.value || _getExt(firstTexWin) || '.png'
+  const effectiveMatExt = exportMatExt.value || costumeStore.matFileExt || '.json'
+
   const data = {
-    avatarRoot: avatarRoot ?? '',
-    gender: gender.value,
+    avatarRoot:  avatarRoot ?? '',
+    gender:      gender.value,
+    modelExt:    effectiveModelExt,
+    textureExt:  effectiveTexExt,
+    matExt:      effectiveMatExt,
     slots: previewModelUrls.value.map(entry => {
-      const mats       = resolved[entry.key] ?? {}
-      const modelRel   = _replaceExt(_rel(_toWinPath(entry.url), avatarRoot), mExt)
-      const materials  = {}
+      const mats      = resolved[entry.key] ?? {}
+      const modelRel  = _stripExt(_rel(_toWinPath(entry.url), avatarRoot))
+      const materials = {}
       for (const [matName, info] of Object.entries(mats)) {
-        const matKey = `${matName}${matExt}`
         if (!info) {
-          materials[matKey] = { mat: _matPath(null, matName, matExt), texture: null }
+          materials[matName] = { mat: _matPath(null, matName, ''), texture: null }
           continue
         }
         if (info.fallbackColor) {
-          materials[matKey] = { mat: _matPath(null, matName, matExt), color: info.fallbackColor }
+          materials[matName] = { mat: _matPath(null, matName, ''), color: info.fallbackColor }
           continue
         }
-        const texRel  = _rel(_toWinPath(info.url), avatarRoot)
-        const texPath = _replaceExt(texRel, tExt)
-        const rec     = { mat: _matPath(texRel, matName, matExt), texture: texPath }
-        if (info.overlayUrl) rec.overlay = _replaceExt(_rel(_toWinPath(info.overlayUrl), avatarRoot), tExt)
-        materials[matKey] = rec
+        const texRelRaw = _rel(_toWinPath(info.url), avatarRoot)
+        const rec = { mat: _matPath(texRelRaw, matName, ''), texture: _stripExt(texRelRaw) }
+        if (info.overlayUrl) rec.overlay = _stripExt(_rel(_toWinPath(info.overlayUrl), avatarRoot))
+        materials[matName] = rec
       }
       return { slot: entry.key, model: modelRel, materials }
     }),

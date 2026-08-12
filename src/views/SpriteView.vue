@@ -284,10 +284,18 @@ function _rel(winPath, root) {
   return winPath.startsWith(prefix) ? winPath.slice(prefix.length) : winPath
 }
 
-function _replaceExt(path, newExt) {
-  if (!path || !newExt) return path
+function _getExt(path) {
+  if (!path) return ''
   const dot = path.lastIndexOf('.')
-  return dot >= 0 ? path.slice(0, dot) + newExt : path + newExt
+  const sep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return dot > sep ? path.slice(dot) : ''
+}
+
+function _stripExt(path) {
+  if (!path) return path
+  const dot = path.lastIndexOf('.')
+  const sep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return dot > sep ? path.slice(0, dot) : path
 }
 
 // Derive mat path from texture path: FolderName\[Yise\]Tex\... → FolderName\Mat\matName.ext
@@ -309,10 +317,7 @@ function openExportDialog() { showExportDialog.value = true }
 
 function doExport() {
   showExportDialog.value = false
-  const mExt   = exportModelExt.value
-  const tExt   = exportTexExt.value
-  const matExt = exportMatExt.value || '.json'
-  const item   = selectedItem.value
+  const item = selectedItem.value
   if (!item) return
   const isYise   = yiseMode.value.has(item.folderPath) && !!item.yise
   const resolved = modelViewerRef.value?.resolvedMaterials ?? {}
@@ -321,27 +326,34 @@ function doExport() {
   if (!entry) return
   const modelWin = _toWinPath(entry.url)
   const petsRoot = _petRoot(modelWin)
-  const modelRel = _replaceExt(_rel(modelWin, petsRoot), mExt)
+
+  // Derive effective extensions: user override → actual file ext → fallback
+  const effectiveModelExt = exportModelExt.value || _getExt(modelWin) || '.glb'
+  const firstTexWin = _toWinPath(Object.values(mats).find(m => m?.url)?.url)
+  const effectiveTexExt = exportTexExt.value || _getExt(firstTexWin) || '.png'
+  const effectiveMatExt = exportMatExt.value || '.json'
+
   const materials = {}
   for (const [matName, info] of Object.entries(mats)) {
-    const matKey = `${matName}${matExt}`
     if (!info) {
-      materials[matKey] = { mat: `${item.folderName}\\Mat\\${matName}${matExt}`, texture: null }
+      materials[matName] = { mat: `${item.folderName}\\Mat\\${matName}`, texture: null }
       continue
     }
     if (info.fallbackColor) {
-      materials[matKey] = { mat: `${item.folderName}\\Mat\\${matName}${matExt}`, color: info.fallbackColor }
+      materials[matName] = { mat: `${item.folderName}\\Mat\\${matName}`, color: info.fallbackColor }
       continue
     }
-    const texRel  = _rel(_toWinPath(info.url), petsRoot)
-    const texPath = _replaceExt(texRel, tExt)
-    materials[matKey] = { mat: _petMatPath(texRel, matName, matExt), texture: texPath }
+    const texRelRaw = _rel(_toWinPath(info.url), petsRoot)
+    materials[matName] = { mat: _petMatPath(texRelRaw, matName, ''), texture: _stripExt(texRelRaw) }
   }
   const data = {
     petsRoot:   petsRoot ?? '',
     folderName: item.folderName,
     yise:       isYise,
-    model:      modelRel,
+    modelExt:   effectiveModelExt,
+    textureExt: effectiveTexExt,
+    matExt:     effectiveMatExt,
+    model:      _stripExt(_rel(modelWin, petsRoot)),
     materials,
   }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
