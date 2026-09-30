@@ -134,8 +134,18 @@ ipcMain.handle('devtools:set', (event, enabled) => {
 // ── Shell IPC ─────────────────────────────────────────────────────────────────
 
 ipcMain.handle('shell:openPath', (_, targetPath) => {
-  // /root prevents Explorer from expanding the full navigation tree, avoiding lag on deep paths.
-  exec(`explorer.exe /root,"${targetPath}"`)
+  // A missing launcher (e.g. xdg-open) must not crash the main process, so swallow exec errors.
+  const run = (cmd) => exec(cmd, () => {})
+
+  if (process.platform === 'win32') {
+    // /root prevents Explorer from expanding the full navigation tree, avoiding lag on deep paths.
+    run(`explorer.exe /root,"${targetPath}"`)
+  } else if (process.platform === 'darwin') {
+    // `open` on a directory brings Finder to the front at that folder.
+    run(`open "${targetPath}"`)
+  } else {
+    run(`xdg-open "${targetPath}"`)
+  }
 })
 
 ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))
