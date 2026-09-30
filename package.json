@@ -2,6 +2,8 @@
   "name": "nrc-model-viewer",
   "version": "0.1.0",
   "private": true,
+  "description": "A tool for previewing various assets exported from the game Roco Kingdom: World.",
+  "author": "Alkaid114",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -47,6 +49,15 @@
     "portable": {
       "requestExecutionLevel": "user",
       "unpackDirName": "nrc-model-viewer"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "category": "Graphics",
+      "maintainer": "Alkaid114",
+      "artifactName": "${productName}-v${version}-${arch}.${ext}"
     }
   }
 }
